@@ -224,7 +224,7 @@ for vm in velocity_models:
 
                         ok = 'no'
 
-                        if mt is not None:
+                        if mt is not None and mt['Mw_new'] < 5.0:
                             lat = mt['Lat']
                             lon = mt['Lon']
                             depth = mt['Dep']
