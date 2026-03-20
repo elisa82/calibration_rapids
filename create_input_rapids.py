@@ -49,6 +49,7 @@ receivers_ID = [{IDs_text}]
 
 #plot
 fmax_filter = 19.5
+fmin_filter = 0.03
 time_max_plot = 60
 interpolation_map = no
 """)
@@ -78,8 +79,8 @@ def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo):
         df_mt[col] = pd.to_numeric(df_mt[col], errors='coerce')
 
     df_mt['Mw_new'] = df_mt['Mw']
-    mask_missing_mw = df_mt['Mw'].isna() & df_mt['M'].notna()
-    df_mt.loc[mask_missing_mw, 'Mw_new'] = df_mt.loc[mask_missing_mw, 'M']
+    mask_missing_mw = df_mt['Mw_new'].isna() & df_mt['Ml'].notna()
+    df_mt.loc[mask_missing_mw, 'Mw_new'] = 0.67 * df_mt.loc[mask_missing_mw, 'Ml'] + 1.15
 
     time_tol=30
     dist_tol=0.2
@@ -96,7 +97,6 @@ def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo):
     mask_mag = abs(df_mt["Mw_new"] - ml_slo) <= mag_tol
 
     candidates = df_mt[mask_time & mask_space & mask_mag]
-    candidates = df_mt[mask_time]
 
     if candidates.empty:
         return None
@@ -165,9 +165,14 @@ import glob
 parent_folder = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration'
 parent_recordings = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Waveforms'
 velocity_models = ['GNDT_14']
-kappa = [0.]
-rise_time = ['Somerville']
-rad_pattern = ['fixed']
+kappa = [0.025,0.037,0.045]
+#1)Parametric spectral inversion of seismic source, path and site parameters: application to northeast Italy
+#L Cataldi, V Poggi, G Costa, S Parolai, B Edwards
+#Geophysical Journal International 232 (3), 1926-1943
+#2) Gentili & Franceschina 2011
+#3) Malagnini et al., 2002
+rise_time = ['Somerville1999','GusevChebrov2019']
+rad_pattern = ['fixed','randomized']
 
 file_terremoti = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/test_EQ/test_earthquakes_arso_2.txt'
 SETTINGS_FILE = f'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/UrgentShake/settings.ini'
@@ -225,6 +230,8 @@ for vm in velocity_models:
                         ok = 'no'
 
                         if mt is not None and mt['Mw_new'] < 5.0:
+                            #date_obj = datetime.strptime(mt['Date'], '%d/%m/%Y')
+                            #if date_obj.year >= 2000:
                             lat = mt['Lat']
                             lon = mt['Lon']
                             depth = mt['Dep']
@@ -261,7 +268,12 @@ for vm in velocity_models:
                             lons = []
                             lats = []
 
-                            channels = ['HHN', 'BHN', 'HNN', 'HHE', 'BHE', 'HNE','HHZ', 'BHZ', 'HNZ']
+                            channel_groups = [
+                                ['HHN', 'HHE', 'HHZ'],
+                                ['BHN', 'BHE', 'BHZ'],
+                                ['HNN', 'HNE', 'HNZ']
+                            ]
+
                             for file in glob.glob(os.path.join(path_metadata, "*.xml")):
                                 inv = read_inventory(file)
                                 for network in inv:
@@ -269,22 +281,37 @@ for vm in velocity_models:
                                         code = f"{network.code}.{station.code}"
                                         lat_station = station.latitude
                                         lon_station = station.longitude
-                                        dist_m, _, _ = gps2dist_azimuth(lat_station, lon_station, lat, lon)
-                                        dist = dist_m/1000.
-                                        if dist < 100.:
-                                            channel_exists = False
-                                            for ch in channels:
-                                                mseed_file = os.path.join(path_recordings, f"{code}..{ch}.mseed")
-                                                if os.path.exists(mseed_file):
-                                                    channel_exists = True
-                                                    break
-                                            if channel_exists:
-                                                IDs.append(code)        
-                                                lons.append(lon_station)        
-                                                lats.append(lat_station)        
-                            create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats)
-                            lista_output_folders.append(output_folder)
-                            lista_ini.append(rapids_ini)
+                                        if lat_station >= 45.5 and lat_station < 47:
+                                            if lon_station >= 12.5 and lon_station < 14.5:
+
+                                                dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
+                                                dist_km = dist_m / 1000
+
+                                                if dist_km < 100:
+
+                                                    station_ok = False
+                                                    for group in channel_groups:
+                                                        files_exist = True
+
+                                                        for ch in group:
+                                                            mseed_file = os.path.join(path_recordings, f"{code}..{ch}.mseed")
+                                                            if not os.path.exists(mseed_file):
+                                                                files_exist = False
+                                                                break
+
+                                                        if files_exist:
+                                                            station_ok = True
+                                                            break
+
+                                                    if station_ok:
+                                                        IDs.append(code)
+                                                        lons.append(lon_station)
+                                                        lats.append(lat_station)
+                            
+                            if len(IDs) >= 10:
+                                create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats)
+                                lista_output_folders.append(output_folder)
+                                lista_ini.append(rapids_ini)
 
 
 script = os.path.join(parent_folder_simulations,"run_calibration.sh")
