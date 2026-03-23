@@ -1,4 +1,46 @@
-def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats):
+def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
+    cores_per_job = 50
+    memory_per_job = 200  # GB
+    total_cores_available = 1000
+    time_limit = "5:00:00"  # hh:mm:ss
+
+    max_concurrent_jobs = total_cores_available // cores_per_job
+    if max_concurrent_jobs == 0:
+        max_concurrent_jobs = 1 
+
+    with open(script_filename, "w") as f:
+        f.write("#!/bin/bash\n")
+        f.write(f"#SBATCH --job-name=calibration\n")
+        f.write(f"#SBATCH --array=1-{NUM_JOBS}%{max_concurrent_jobs}\n")
+        f.write(f"#SBATCH --time={time_limit}\n")
+        f.write(f"#SBATCH --ntasks=1\n")
+        f.write(f"#SBATCH --cpus-per-task={cores_per_job}\n")
+        f.write(f"#SBATCH --mem={memory_per_job}G\n")
+        f.write(f"#SBATCH --output=out_%A_%a.out\n\n")
+        f.write('export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n')
+        f.write('echo "Job $SLURM_ARRAY_TASK_ID uses $SLURM_CPUS_ON_NODE cores"\n')
+        f.write('source /home/utente/venv/bin/activate\n')
+
+        f.write(f"out_folder_list=({' '.join(out_folders)})\n")
+        f.write(f"ini_file_list=({' '.join(ini_files)})\n")
+        f.write("idx=$((SLURM_ARRAY_TASK_ID-1))\n")
+        f.write("out_folder=${out_folder_list[$idx]}\n")
+        f.write("ini_file=${ini_file_list[$idx]}\n")
+
+        f.write('cd $HOME\n')
+        f.write("cd $HOME\n")
+        f.write("rm -rf $out_folder\n")     
+        f.write("mkdir -p $out_folder\n")   
+        f.write("python -m rapids $ini_file ucsb --run\n")  
+        f.write("cd $out_folder/UCSB\n")     
+        f.write("bash do_all.sh\n")            
+        f.write("cd $HOME\n")                   
+        f.write(f"python -m rapids $ini_file ucsbrec --post\n")  
+        f.write("\n")
+    return
+
+
+def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats,qs_mode):
     if vm == 'GNDT_14':
         gf = 'gndt0014'
     IDs_text = ', '.join(IDs)
@@ -18,6 +60,7 @@ path_mseed = {os.path.dirname(recordings_folder)}
 
 #velocity model
 vel_model = {vm}
+qs_mode = {qs_mode}
 
 fault_type = point
 slip_mode = Archuleta
@@ -49,7 +92,7 @@ receivers_ID = [{IDs_text}]
 
 #plot
 fmax_filter = 19.5
-fmin_filter = 0.03
+fmin_filter = 0.01
 time_max_plot = 60
 interpolation_map = no
 """)
@@ -81,6 +124,9 @@ def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo):
     df_mt['Mw_new'] = df_mt['Mw']
     mask_missing_mw = df_mt['Mw_new'].isna() & df_mt['Ml'].notna()
     df_mt.loc[mask_missing_mw, 'Mw_new'] = 0.67 * df_mt.loc[mask_missing_mw, 'Ml'] + 1.15
+
+    #Munafò I., Malagnini L., Chiaraluce L., 2016. On the relationship between Mw and ML for small earthquakes, Bull. seism. Soc. Am., 106, 2402–2408.
+Google ScholarCrossrefSearch ADSWorldCat
 
     time_tol=30
     dist_tol=0.2
@@ -164,13 +210,16 @@ import glob
 
 parent_folder = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration'
 parent_recordings = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Waveforms'
-velocity_models = ['GNDT_14']
-kappa = [0.025,0.037,0.045]
+velocity_models = ['FRIUL7W','NAC_1D','NWSLOVENIA']
+kappa = [0,0.025,0.037,0.045]
 #1)Parametric spectral inversion of seismic source, path and site parameters: application to northeast Italy
 #L Cataldi, V Poggi, G Costa, S Parolai, B Edwards
 #Geophysical Journal International 232 (3), 1926-1943
 #2) Gentili & Franceschina 2011
+#Gentili S., Franceschina G., 2011. High frequency attenuation of shear waves in the southeastern Alps and northern Dinarides, Geophys. J. Int., 185(3), 1393–1416..10.1111/j.1365-246X.2011.05016.x
 #3) Malagnini et al., 2002
+#Malagnini L., Akinci A., Herrmann R., Pino N., Scognamiglio L., 2002. Characteristics of the ground motion in northeastern Italy, Bull. seism. Soc. Am., 92, 2186–2204..10.1785/0120010219
+qs_mode = ['USGS','f1H','f5Hz','f10Hz']
 rise_time = ['Somerville1999','GusevChebrov2019']
 rad_pattern = ['fixed','randomized']
 
@@ -212,11 +261,12 @@ df_events = pd.DataFrame({
 
 lista_ini = []
 lista_output_folders = []
+num_jobs = 0
 for vm in velocity_models:
     for k in kappa:
         for rt in rise_time:
             for rp in rad_pattern:
-                modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}"
+                modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}_qs_{qs_mode}"
                 for i, row in df_events.iterrows():
                     recordings_folder = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
                     if os.path.exists(recordings_folder):
@@ -308,11 +358,10 @@ for vm in velocity_models:
                                                         lons.append(lon_station)
                                                         lats.append(lat_station)
                             
-                            if len(IDs) >= 10:
-                                create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats)
-                                lista_output_folders.append(output_folder)
-                                lista_ini.append(rapids_ini)
-
+                                    create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats,qs_mode)
+                                    lista_output_folders.append(output_folder)
+                                    lista_ini.append(rapids_ini)
+                                    num_jobs = num_jobs + 1
 
 script = os.path.join(parent_folder_simulations,"run_calibration.sh")
 with open(script, "w") as f:
@@ -326,3 +375,7 @@ with open(script, "w") as f:
         f.write("cd $HOME\n")
         f.write(f"python -m rapids '{ini_file}' ucsbrec --post \n")
         f.write(f"\n")
+
+
+script_filename= "run_array.sh"
+create_script_slurm(num_jobs,script_filename,out_folders, ini_files)
