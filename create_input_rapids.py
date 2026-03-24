@@ -1,48 +1,150 @@
+from collections.abc import Iterable
+from pathlib import Path
+import pandas as pd
+
+def get_soil_class(station_pairs: Iterable[tuple[str, str]] | tuple[str, str]):
+    def normalize(value: object) -> str | None:
+        if pd.isna(value):
+            return None
+        text = str(value).strip()
+        return text.casefold() if text else None
+
+    requested_pairs = [station_pairs] if isinstance(station_pairs, tuple) else list(station_pairs)
+    lookup = {
+        (normalize(network), normalize(station)): []
+        for network, station in requested_pairs
+        if normalize(network) and normalize(station)
+    }
+
+    sources = [
+        ("/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/soil_class_carla", "NET", "Code", "EC8", ("Vs30",), "csv", {"sep": r"\s+", "engine": "python", "skiprows": [1]}),
+        ("/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/EC8_PGArecordingStations.xlsx", "network", "station", "ground_type (EC8)", ("vs30",), "excel", {}),
+        ("/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/ESM_stations.xlsx", "Net_code", "Sta_code", "EC8 code", ("Vs30",), "excel", {"header": 1}),
+    ]
+
+    def safe_lookup(df, net_val, sta_val, net_col, sta_col, soil_col, vs30_col):
+        def lookup_for(nv):
+            mask = (df[net_col].astype(str).str.strip().str.upper() == nv.upper()) & \
+                   (df[sta_col].astype(str).str.strip().str.upper() == sta_val.upper())
+            soil_series = df.loc[mask, soil_col].dropna().astype(str).str.strip()
+            vs30_series = df.loc[mask, vs30_col].dropna().astype(str).str.strip()
+            soil_val = next((v for v in soil_series if v.lower() != 'unknown'), None)
+            vs30_val = next((v for v in vs30_series if v.lower() != 'unknown'), None)
+            return soil_val, vs30_val
+
+        soil_val, vs30_val = lookup_for(net_val)
+        if soil_val is None and vs30_val is None and net_val.upper() in ("FV", "NI"):
+            soil_val, vs30_val = lookup_for("OX")
+        return soil_val, vs30_val
+
+    # Ciclo sui requested pairs
+    for net_val_orig, sta_val_orig in requested_pairs:
+        net_val_norm, sta_val_norm = normalize(net_val_orig), normalize(sta_val_orig)
+        soil_text, vs30_text = None, None
+
+        # Prova le fonti in ordine
+        for path, net_col_name, sta_col_name, soil_col_name, vs30_cols_names, file_type, read_kwargs in sources:
+            if file_type == "csv":
+                df = pd.read_csv(path, dtype=str, **read_kwargs)
+            else:
+                df = pd.read_excel(path, dtype=str, **read_kwargs)
+
+            df.columns = [str(c).strip() for c in df.columns]
+            net_col = next(c for c in df.columns if normalize(c) == normalize(net_col_name))
+            sta_col = next(c for c in df.columns if normalize(c) == normalize(sta_col_name))
+            soil_col = next(c for c in df.columns if normalize(c) == normalize(soil_col_name))
+            vs30_col = next(c for c in df.columns if normalize(c) in {normalize(v) for v in vs30_cols_names})
+
+            soil_text, vs30_text = safe_lookup(df, net_val_orig, sta_val_orig, net_col, sta_col, soil_col, vs30_col)
+            if soil_text is not None or vs30_text is not None:
+                break  # trovato valore valido, non cercare nelle altre fonti
+
+        lookup[(net_val_norm, sta_val_norm)] = [(soil_text, vs30_text)]
+
+    ec8_list = []
+    vs30_list = []
+    for net_val_orig, sta_val_orig in requested_pairs:
+        key = (normalize(net_val_orig), normalize(sta_val_orig))
+        matches = lookup.get(key, [])
+        if matches:
+            ec8_val, vs30_val = matches[0]
+        else:
+            ec8_val, vs30_val = None, None
+        ec8_list.append(ec8_val)
+        vs30_list.append(vs30_val)
+
+    return ec8_list, vs30_list
+
+
 def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
-    cores_per_job = 50
-    memory_per_job = 200  # GB
+    cores_per_job = 20
+    memory_per_job = 50  # GB
     total_cores_available = 1000
-    time_limit = "5:00:00"  # hh:mm:ss
+    time_limit = "1:00:00"  # hh:mm:ss
 
     max_concurrent_jobs = total_cores_available // cores_per_job
+    max_concurrent_jobs = 100
     if max_concurrent_jobs == 0:
         max_concurrent_jobs = 1 
 
     with open(script_filename, "w") as f:
         f.write("#!/bin/bash\n")
-        f.write(f"#SBATCH --job-name=calibration\n")
+        f.write("#SBATCH --job-name=calibration\n")
         f.write(f"#SBATCH --array=1-{NUM_JOBS}%{max_concurrent_jobs}\n")
         f.write(f"#SBATCH --time={time_limit}\n")
-        f.write(f"#SBATCH --ntasks=1\n")
+        f.write("#SBATCH --ntasks=1\n")
         f.write(f"#SBATCH --cpus-per-task={cores_per_job}\n")
         f.write(f"#SBATCH --mem={memory_per_job}G\n")
-        f.write(f"#SBATCH --output=out_%A_%a.out\n\n")
-        f.write('export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n')
-        f.write('echo "Job $SLURM_ARRAY_TASK_ID uses $SLURM_CPUS_ON_NODE cores"\n')
-        f.write('source /home/utente/venv/bin/activate\n')
+        f.write("#SBATCH --output=out_%A_%a.out\n")
+        f.write("#SBATCH --account=OGS23_PRACE_IT_1\n")
+        f.write("#SBATCH --partition=dcgp_usr_prod\n")
+        f.write("#SBATCH --qos=normal\n")
 
-        f.write(f"out_folder_list=({' '.join(out_folders)})\n")
-        f.write(f"ini_file_list=({' '.join(ini_files)})\n")
+        f.write("\n")
+        f.write("module purge\n")
+        f.write("module load openmpi/4.1.6--gcc--12.2.0\n")
+        f.write("module load gmt/6.4.0--gcc--12.2.0\n")
+        f.write("module load python/3.11.6--gcc--12.2.0-nlkgjki\n")
+
+        f.write("\n")
+        f.write("export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n")
+        f.write('echo "Job $SLURM_ARRAY_TASK_ID uses $SLURM_CPUS_PER_TASK cores"\n')
+
+        f.write("\n")
+        f.write("source /leonardo/home/userexternal/ezuccolo/urgent_shake_venv/bin/activate\n")
+        f.write("source /leonardo/home/userexternal/ezuccolo/UrgentShake/profile.inc\n")
+
+        f.write("\n")
+        f.write("unset I_MPI_PMI_LIBRARY\n")
+        f.write("export I_MPI_JOB_RESPECT_PROCESS_PLACEMENT=0\n\n")
+
+        f.write("\n")
+        f.write(f"out_folder_list=({' '.join(f'\"{x}\"' for x in out_folders)})\n")
+        f.write(f"ini_file_list=({' '.join(f'\"{x}\"' for x in ini_files)})\n")
+
+        f.write("\n")
         f.write("idx=$((SLURM_ARRAY_TASK_ID-1))\n")
         f.write("out_folder=${out_folder_list[$idx]}\n")
-        f.write("ini_file=${ini_file_list[$idx]}\n")
+        f.write("ini_file=${ini_file_list[$idx]}\n\n")
 
-        f.write('cd $HOME\n')
+        f.write("\n")
         f.write("cd $HOME\n")
-        f.write("rm -rf $out_folder\n")     
-        f.write("mkdir -p $out_folder\n")   
-        f.write("python -m rapids $ini_file ucsb --run\n")  
-        f.write("cd $out_folder/UCSB\n")     
-        f.write("bash do_all.sh\n")            
-        f.write("cd $HOME\n")                   
-        f.write(f"python -m rapids $ini_file ucsbrec --post\n")  
+        f.write('rm -rf "$out_folder"\n')
+        f.write('mkdir -p "$out_folder"\n')
+
+        f.write('my_prex_or_die "python -m rapids $ini_file ucsb --run"\n')
+
+        f.write('cd "$out_folder/UCSB" || exit 1\n')
+        f.write('my_prex_or_die "bash do_all.sh"\n')
+
+        f.write("cd $HOME\n")
+        f.write('my_prex_or_die "python -m rapids $ini_file ucsbrec --post"\n')
+
         f.write("\n")
     return
 
-
 def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats,qs_mode):
-    if vm == 'GNDT_14':
-        gf = 'gndt0014'
+    gf = f"{vm}_{qs_mode}"
     IDs_text = ', '.join(IDs)
     lats_text = ', '.join(str(lat) for lat in lats)
     lons_text = ', '.join(str(lon) for lon in lons)
@@ -126,7 +228,6 @@ def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo):
     df_mt.loc[mask_missing_mw, 'Mw_new'] = 0.67 * df_mt.loc[mask_missing_mw, 'Ml'] + 1.15
 
     #Munafò I., Malagnini L., Chiaraluce L., 2016. On the relationship between Mw and ML for small earthquakes, Bull. seism. Soc. Am., 106, 2402–2408.
-Google ScholarCrossrefSearch ADSWorldCat
 
     time_tol=30
     dist_tol=0.2
@@ -210,6 +311,8 @@ import glob
 
 parent_folder = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration'
 parent_recordings = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Waveforms'
+parent_folder_simulations = os.path.join(parent_folder, 'Simulations')
+os.makedirs(parent_folder_simulations, exist_ok=True)
 velocity_models = ['FRIUL7W','NAC_1D','NWSLOVENIA']
 kappa = [0,0.025,0.037,0.045]
 #1)Parametric spectral inversion of seismic source, path and site parameters: application to northeast Italy
@@ -258,107 +361,125 @@ df_events = pd.DataFrame({
     "Ml": df['magnitude']
 })
 
-
+lista_A_stations = []
 lista_ini = []
 lista_output_folders = []
 num_jobs = 0
-for vm in velocity_models:
-    for k in kappa:
-        for rt in rise_time:
-            for rp in rad_pattern:
-                modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}_qs_{qs_mode}"
-                for i, row in df_events.iterrows():
-                    recordings_folder = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
-                    if os.path.exists(recordings_folder):
-                        parent_folder_simulations = os.path.join(parent_folder, 'Simulations')
-                        os.makedirs(parent_folder_simulations, exist_ok=True)
-                        rapids_ini = os.path.join(parent_folder_simulations, f'rapids_{row['event_id']}_{modello}.ini')
-                        output_folder = os.path.join(parent_folder_simulations, row['event_id'], modello)
+for i, row in df_events.iterrows():
+    recordings_folder = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
+    if os.path.exists(recordings_folder):
 
-                        mt = retrieve_focal_mechanisms_Mw(row['datetime'],row["lat"],row["lon"],row["depth"],row["Ml"])
+        mt = retrieve_focal_mechanisms_Mw(row['datetime'],row["lat"],row["lon"],row["depth"],row["Ml"])
 
-                        ok = 'no'
+        ok = 'no'
 
-                        if mt is not None and mt['Mw_new'] < 5.0:
-                            #date_obj = datetime.strptime(mt['Date'], '%d/%m/%Y')
-                            #if date_obj.year >= 2000:
-                            lat = mt['Lat']
-                            lon = mt['Lon']
-                            depth = mt['Dep']
-                            date = mt['Date']
-                            time = mt['Time']
-                            mw = mt['Mw_new']
-                            stk = mt['Str1']
-                            dip = mt['Dip1']
-                            rak = mt['Rak1']
-                            ok = "yes"
+        if mt is not None and mt['Mw_new'] < 5.0:
+            #date_obj = datetime.strptime(mt['Date'], '%d/%m/%Y')
+            #if date_obj.year >= 2000:
+            lat = mt['Lat']
+            lon = mt['Lon']
+            depth = mt['Dep']
+            date = mt['Date']
+            time = mt['Time']
+            mw = mt['Mw_new']
+            stk = mt['Str1']
+            dip = mt['Dip1']
+            rak = mt['Rak1']
+            ok = "yes"
 
-                        if row['datetime']==pd.Timestamp(datetime(2024, 3, 27, 21, 19, 0)):
-                            #MT solutions; OGS Real Time Seismology (RTS) service: https://rts.crs.inogs.it/en/
-                            lat = 46.3583	
-                            lon = 12.808	
-                            dep = 10.22
-                            mw = 4.2
-                            stk1 = 81	
-                            dip1 = 47	
-                            rak1 = 133
-                            stk2 = 207	
-                            dip2 = 58	
-                            rak2 = 54
-                            stk = stk1
-                            dip = dip1
-                            rak = rak1
-                            ok = "yes"
+        if row['datetime']==pd.Timestamp(datetime(2024, 3, 27, 21, 19, 0)):
+            #MT solutions; OGS Real Time Seismology (RTS) service: https://rts.crs.inogs.it/en/
+            lat = 46.3583	
+            lon = 12.808	
+            dep = 10.22
+            mw = 4.2
+            stk1 = 81	
+            dip1 = 47	
+            rak1 = 133
+            stk2 = 207	
+            dip2 = 58	
+            rak2 = 54
+            stk = stk1
+            dip = dip1
+            rak = rak1
+            ok = "yes"
 
-                        if ok == "yes":
-                            path_metadata = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'response')
-                            path_recordings = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
-                            stations = []
-                            IDs = []
-                            lons = []
-                            lats = []
+        if ok == "yes":
+            path_metadata = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'response')
+            path_recordings = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
+            stations = []
+            IDs = []
+            lons = []
+            lats = []
 
-                            channel_groups = [
-                                ['HHN', 'HHE', 'HHZ'],
-                                ['BHN', 'BHE', 'BHZ'],
-                                ['HNN', 'HNE', 'HNZ']
-                            ]
+            channel_groups = [
+                ['HHN', 'HHE', 'HHZ'],
+                ['EHN', 'EHE', 'EHZ'],
+                ['SHN', 'SHE', 'SHZ'],
+                ['BHN', 'BHE', 'BHZ'],
+                ['HNN', 'HNE', 'HNZ'],
+                ['HGN', 'HGE', 'HGZ']
+            ]
 
-                            for file in glob.glob(os.path.join(path_metadata, "*.xml")):
-                                inv = read_inventory(file)
-                                for network in inv:
-                                    for station in network:
-                                        code = f"{network.code}.{station.code}"
-                                        lat_station = station.latitude
-                                        lon_station = station.longitude
-                                        if lat_station >= 45.5 and lat_station < 47:
-                                            if lon_station >= 12.5 and lon_station < 14.5:
+            soil_cache = {}
 
-                                                dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
-                                                dist_km = dist_m / 1000
+            for file in glob.glob(os.path.join(path_metadata, "*.xml")):
+                inv = read_inventory(file)
+                for network in inv:
+                    for station in network:
+                        code = f"{network.code}.{station.code}"
+                        lat_station = station.latitude
+                        lon_station = station.longitude
+                        station_ok = False
 
-                                                if dist_km < 100:
+                        if lat_station >= 45.5 and lat_station < 47:
+                            if lon_station >= 12.5 and lon_station < 14.5:
 
-                                                    station_ok = False
-                                                    for group in channel_groups:
-                                                        files_exist = True
+                                dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
+                                dist_km = dist_m / 1000
 
-                                                        for ch in group:
-                                                            mseed_file = os.path.join(path_recordings, f"{code}..{ch}.mseed")
-                                                            if not os.path.exists(mseed_file):
-                                                                files_exist = False
-                                                                break
+                                if dist_km < 100:
 
-                                                        if files_exist:
-                                                            station_ok = True
-                                                            break
+                                    if code in soil_cache:
+                                        ec8, vs30 = soil_cache[code]
+                                    else:
+                                        ec8_list, vs30_list = get_soil_class([(network.code, station.code)])
+                                        ec8, vs30 = ec8_list[0], vs30_list[0]
+                                        soil_cache[code] = (ec8, vs30)
 
-                                                    if station_ok:
-                                                        IDs.append(code)
-                                                        lons.append(lon_station)
-                                                        lats.append(lat_station)
-                            
-                                    create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats,qs_mode)
+                                    if ec8 == 'A' or (vs30 is not None and float(vs30) > 799.99):
+                                        for group in channel_groups:
+                                            files_exist = True
+
+                                            for ch in group:
+                                                mseed_file = os.path.join(path_recordings, f"{code}..{ch}.mseed")
+                                                if not os.path.exists(mseed_file):
+                                                    files_exist = False
+                                                    break
+
+                                            if files_exist:
+                                                station_ok = True
+                                                break
+
+                                        if station_ok:
+                                            IDs.append(code)
+                                            lons.append(lon_station)
+                                            lats.append(lat_station)
+                                            lista_A_stations.append(code)
+
+            lista_A_stations = list(dict.fromkeys(lista_A_stations))
+            print(lista_A_stations)
+            
+            if len(IDs) > 0:
+                for vm in velocity_models:
+                    for k in kappa:
+                        for rt in rise_time:
+                            for rp in rad_pattern:
+                                for qs in qs_mode:
+                                    modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}_qs_{qs}"
+                                    rapids_ini = os.path.join(parent_folder_simulations, f'rapids_{row['event_id']}_{modello}.ini')
+                                    output_folder = os.path.join(parent_folder_simulations, row['event_id'], modello)
+                                    create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats,qs)
                                     lista_output_folders.append(output_folder)
                                     lista_ini.append(rapids_ini)
                                     num_jobs = num_jobs + 1
@@ -378,4 +499,4 @@ with open(script, "w") as f:
 
 
 script_filename= "run_array.sh"
-create_script_slurm(num_jobs,script_filename,out_folders, ini_files)
+create_script_slurm(num_jobs,script_filename,lista_output_folders,lista_ini)
