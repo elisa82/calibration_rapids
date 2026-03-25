@@ -193,8 +193,8 @@ receivers_lon = [{lons_text}]
 receivers_ID = [{IDs_text}]
 
 #plot
-fmax_filter = 19.5
-fmin_filter = 0.01
+fmax_filter = 19.9
+fmin_filter = 0.25
 time_max_plot = 60
 interpolation_map = no
 """)
