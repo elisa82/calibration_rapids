@@ -5,75 +5,93 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="obspy.io.stationxml.core")
 
-def get_soil_class(station_pairs: Iterable[tuple[str, str]] | tuple[str, str]):
-    def normalize(value: object) -> str | None:
-        if pd.isna(value):
-            return None
-        text = str(value).strip()
-        return text.casefold() if text else None
+def define_filters(ch):
+    if ch in ['HH', 'BH']:
+        fmin = 0.1
+    if ch in ['EH', 'SH', 'HN', 'HG']:
+        fmin = 0.2
+    if ch in ['BH']:
+        fmax = 5
+    else:
+        fmax = 19.9
+    return fmin, fmax
 
-    requested_pairs = [station_pairs] if isinstance(station_pairs, tuple) else list(station_pairs)
-    lookup = {
-        (normalize(network), normalize(station)): []
-        for network, station in requested_pairs
-        if normalize(network) and normalize(station)
-    }
 
-    sources = [
-        ("/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/soil_class_carla", "NET", "Code", "EC8", ("Vs30",), "csv", {"sep": r"\s+", "engine": "python", "skiprows": [1]}),
-        ("/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/EC8_PGArecordingStations.xlsx", "network", "station", "ground_type (EC8)", ("vs30",), "excel", {}),
-        ("/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/ESM_stations.xlsx", "Net_code", "Sta_code", "EC8 code", ("Vs30",), "excel", {"header": 1}),
+def check_station_groups(code, path_recordings,source_rec):
+    import os
+    import glob
+    channel_groups = [
+        ['HHN', 'HHE', 'HHZ'],
+        ['EHN', 'EHE', 'EHZ'],
+        ['SHN', 'SHE', 'SHZ'],
+        ['BHN', 'BHE', 'BHZ'],
+        ['HNN', 'HNE', 'HNZ'],
+        ['HGN', 'HGE', 'HGZ']
     ]
 
-    def safe_lookup(df, net_val, sta_val, net_col, sta_col, soil_col, vs30_col):
-        def lookup_for(nv):
-            mask = (df[net_col].astype(str).str.strip().str.upper() == nv.upper()) & \
-                   (df[sta_col].astype(str).str.strip().str.upper() == sta_val.upper())
-            soil_series = df.loc[mask, soil_col].dropna().astype(str).str.strip()
-            vs30_series = df.loc[mask, vs30_col].dropna().astype(str).str.strip()
-            soil_val = next((v for v in soil_series if v.lower() != 'unknown'), None)
-            vs30_val = next((v for v in vs30_series if v.lower() != 'unknown'), None)
-            return soil_val, vs30_val
-
-        soil_val, vs30_val = lookup_for(net_val)
-        if soil_val is None and vs30_val is None and net_val.upper() in ("FV", "NI"):
-            soil_val, vs30_val = lookup_for("OX")
-        return soil_val, vs30_val
-
-    for net_val_orig, sta_val_orig in requested_pairs:
-        net_val_norm, sta_val_norm = normalize(net_val_orig), normalize(sta_val_orig)
-        soil_text, vs30_text = None, None
-
-        for path, net_col_name, sta_col_name, soil_col_name, vs30_cols_names, file_type, read_kwargs in sources:
-            if file_type == "csv":
-                df = pd.read_csv(path, dtype=str, **read_kwargs)
+    for idx, group in enumerate(channel_groups):
+        all_exist = True
+        for ch in group:
+            if source_rec == "RAN":
+                pattern = os.path.join(path_recordings, f"*.{code}.{ch}")
+                matching_files = glob.glob(pattern)
+                if not matching_files:
+                    all_exist = False
+                break
             else:
-                df = pd.read_excel(path, dtype=str, **read_kwargs)
-            df.columns = [str(c).strip() for c in df.columns]
-            net_col = next(c for c in df.columns if normalize(c) == normalize(net_col_name))
-            sta_col = next(c for c in df.columns if normalize(c) == normalize(sta_col_name))
-            soil_col = next(c for c in df.columns if normalize(c) == normalize(soil_col_name))
-            vs30_col = next(c for c in df.columns if normalize(c) in {normalize(v) for v in vs30_cols_names})
+                rec_file = os.path.join(path_recordings, f"{code}..{ch}.mseed")
 
-            soil_text, vs30_text = safe_lookup(df, net_val_orig, sta_val_orig, net_col, sta_col, soil_col, vs30_col)
-            if soil_text is not None or vs30_text is not None:
-                break  # trovato valore valido, non cercare nelle altre fonti
+            if not os.path.exists(rec_file):
+                all_exist = False
+                break  
 
-        lookup[(net_val_norm, sta_val_norm)] = [(soil_text, vs30_text)]
+        if all_exist:
+            sensor_type = "accelerometer" if idx >= len(channel_groups) - 2 else "seismometer"
+            return True, group, sensor_type
 
-    ec8_list = []
-    vs30_list = []
-    for net_val_orig, sta_val_orig in requested_pairs:
-        key = (normalize(net_val_orig), normalize(sta_val_orig))
-        matches = lookup.get(key, [])
-        if matches:
-            ec8_val, vs30_val = matches[0]
-        else:
-            ec8_val, vs30_val = None, None
-        ec8_list.append(ec8_val)
-        vs30_list.append(vs30_val)
+    return False, None, None
 
-    return ec8_list, vs30_list
+
+def get_soil_class(net,sta,sensor):
+    import pandas as pd
+
+    soil_class = None
+
+    if net in ['OX', 'FV', 'NI']:
+        file_CRS = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/soil_class_Klin.csv'
+        df_crs = pd.read_csv(file_CRS)
+        df_crs['Station'] = df_crs['Station'].astype(str).str.strip()
+        df_crs['Geomorphological_Scenario'] = df_crs['Geomorphological_Scenario'].astype(str).str.strip()
+        df_crs['soil'] = df_crs['Geomorphological_Scenario'].str[0]
+
+        selected_row = df_crs[df_crs['Station'] == sta]
+        if not selected_row.empty:
+            soil_class = selected_row['soil'].values[0]
+
+    if soil_class is None and net == 'SL':
+        file_slovenia = '/Users/ezuccolo/Downloads/EC8_PGArecordingStations.xlsx'
+        df_sl = pd.read_excel(file_slovenia)
+        df_sl["station"] = df_sl["station"].astype(str).str.strip()
+        df_sl["ground_type (EC8)"] = df_sl["ground_type (EC8)"].astype(str).str.strip()
+        df_sl[['station_code', 'sensor_type']] = df_sl['station'].str.split(',', n=1, expand=True)
+        df_sl['sensor_type'] = df_sl['sensor_type'].fillna("")  
+        selected_row = df_sl[(df_sl['station_code'] == sta) & ((df_sl['sensor_type'] == sensor) | (df_sl['sensor_type'] == ""))]
+        if not selected_row.empty:
+            soil_class = selected_row['ground_type (EC8)'].values[0]
+
+    if soil_class is None:
+        file_ESM = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/ESM_stations.xlsx'
+        df_esm = pd.read_excel(file_ESM)
+        df_esm["Net_code"] = df_esm["Net_code"].astype(str).str.strip()
+        df_esm["Sta_code"] = df_esm["Sta_code"].astype(str).str.strip()
+        df_esm["EC8 code"] = df_esm["EC8 code"].astype(str).str.strip()
+        df_esm["Vs30"] = pd.to_numeric(df_esm["Vs30"], errors='coerce')
+        net_esm = 'OX' if net in ['FV'] else net
+        selected_row = df_esm[(df_esm["Net_code"] == net_esm) & (df_esm["Sta_code"] == sta)]
+        if not selected_row.empty:
+            soil_class = selected_row["EC8 code"].values[0]
+
+    return soil_class
 
 
 def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
@@ -143,11 +161,14 @@ def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
         f.write("\n")
     return
 
-def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,recordings_folder,IDs,lons,lats,qs_mode):
+def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs_mode,fmins,fmaxs,channels,recordings_folder_CRS,recordings_folder_RAN,inventory_folder_CRS,inventory_folder_RAN):
     gf = f"{vm}_{qs_mode}"
     IDs_text = ', '.join(IDs)
     lats_text = ', '.join(str(lat) for lat in lats)
     lons_text = ', '.join(str(lon) for lon in lons)
+    fmins_text = ', '.join(str(fmin) for fmin in fmins)
+    fmaxs_text = ', '.join(str(fmax) for fmax in fmaxs)
+    channels_text = ', '.join(str(ch) for ch in channels)
 
     with open(rapids_ini, "w", encoding="utf-8") as f:
         f.write(f"""output_folder = {output_folder}
@@ -157,8 +178,6 @@ fault_geolocation = from_hypo
 
 #type_run: standard o test
 type_run = standard
-
-path_mseed = {os.path.dirname(recordings_folder)}
 
 #velocity model
 vel_model = {vm}
@@ -193,10 +212,15 @@ receivers_lon = [{lons_text}]
 receivers_ID = [{IDs_text}]
 
 #plot
-fmax_filter = 19.9
-fmin_filter = 0.25
+fmax_rec = [{fmaxs_text}]
+fmin_rec = [{fmins_text}]
+channel_rec = [{channels_text}]
 time_max_plot = 60
 interpolation_map = no
+path_rec_CRS = {recordings_folder_CRS}
+path_rec_RAN = {recordings_folder_RAN}
+path_inv_CRS = {inventory_folder_CRS}
+path_inv_RAN = {inventory_folder_RAN}
 """)
 
 
@@ -383,14 +407,6 @@ lista_ini = []
 lista_output_folders = []
 num_jobs = 0
 
-channel_groups = [
-    ['HHN', 'HHE', 'HHZ'],
-    ['EHN', 'EHE', 'EHZ'],
-    ['SHN', 'SHE', 'SHZ'],
-    ['BHN', 'BHE', 'BHZ'],
-    ['HNN', 'HNE', 'HNZ'],
-    ['HGN', 'HGE', 'HGZ']
-]
 
 soil_cache = {}
 for i, row in df_events.iterrows():
@@ -408,19 +424,29 @@ for i, row in df_events.iterrows():
     IDs = []
     lons = []
     lats = []
+    channels = []
+    fmins = []
+    fmaxs = []
 
+    path_rec_CRS = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
+    path_inv_CRS = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'response')
+    source_rec_CRS = 'web_server_CRS'
+    path_rec_RAN = os.path.join(parent_recordings_RAN, f"{row['event_id']}_sac") 
+    path_inv_RAN = os.path.join(parent_recordings_RAN, 'StationXML_IT') 
+    source_rec_RAN = 'RAN'
     for j in range(2):
-        j = 1
         if j==0:
-            path_recordings = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
-            path_metadata = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'response')
+            path_recordings = path_rec_CRS
+            path_metadata = path_inv_CRS
+            source_rec = source_rec_CRS
         else:
-            path_recordings = os.path.join(parent_recordings_RAN, f"{row['event_id']}_sac") 
-            path_metadata = os.path.join(parent_recordings_RAN, 'StationXML_IT') 
-    
+            path_recordings = path_rec_RAN
+            path_metadata = path_inv_RAN
+            source_rec = source_rec_RAN
+            
         if os.path.exists(path_recordings):
 
-            if i == 0:
+            if j == 0:
                 xml_files = glob.glob(os.path.join(path_metadata, "*.xml"))
             else:
                 recording_files = glob.glob(os.path.join(path_recordings, "*"))
@@ -438,69 +464,62 @@ for i, row in df_events.iterrows():
                     if os.path.exists(path_xml):
                         xml_files.append(path_xml)
 
-                for file in xml_files:
-                    inv = read_inventory(file)
-                    for network in inv:
-                        for station in network:
-                            code = f"{network.code}.{station.code}"
-                            lat_station = station.latitude
-                            lon_station = station.longitude
-                            station_ok = False
-                            if code:
-                                if lat_station >= 45.3 and lat_station < 47:
-                                    if lon_station >= 12.5 and lon_station < 14.5:
+            for file in xml_files:
+                inv = read_inventory(file)
+                for network in inv:
+                    for station in network:
+                        code = f"{network.code}.{station.code}"
+                        lat_station = station.latitude
+                        lon_station = station.longitude
 
-                                        dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
-                                        dist_km = dist_m / 1000
+                        station_ok, valid_group, sensor_type = check_station_groups(code, path_recordings, source_rec)
 
-                                        if dist_km < 100:
-                                            
-                                            if code in soil_cache:
-                                                ec8, vs30 = soil_cache[code]
-                                            else:
-                                                ec8_list, vs30_list = get_soil_class([(network.code, station.code)])
-                                                ec8, vs30 = ec8_list[0], vs30_list[0]
-                                                soil_cache[code] = (ec8, vs30)
+                        if sensor_type == "accelerometer":
+                            max_dist_km = 50
+                        else:
+                            max_dist_km = 100
 
+                        if station_ok:
+                            if lat_station >= 45.3 and lat_station < 47:
+                                if lon_station >= 12.5 and lon_station < 14.5:
 
-                                            if ec8 == 'A' or (vs30 is not None and float(vs30) > 799.99):
-                                                if j == 0:
-                                                    for group in channel_groups:
-                                                        files_exist = True
+                                    dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
+                                    dist_km = dist_m / 1000
 
-                                                        for ch in group:
-                                                            mseed_file = os.path.join(path_recordings, f"{code}..{ch}.mseed")
-                                                            if not os.path.exists(mseed_file):
-                                                                files_exist = False
-                                                                break
+                                    if dist_km < max_dist_km:
+                                        
+                                        if code in soil_cache:
+                                            soil = soil_cache[code]
+                                        else:
+                                            soil = get_soil_class(network.code, station.code, sensor_type)
+                                            soil_cache[code] = soil
 
-                                                        if files_exist:
-                                                            station_ok = True
-                                                            break
-                                                else:
-                                                    station_ok = True
+                                        if soil == 'A' or soil == 'H':
+                                            IDs.append(code)
+                                            lons.append(lon_station)
+                                            lats.append(lat_station)
+                                            channels.append(valid_group[0][:2])
+                                            fmin_rec, fmax_rec = define_filters(valid_group[0][:2])
+                                            fmins.append(fmin_rec)
+                                            fmaxs.append(fmax_rec)
+                                            lista_A_stations.append(code)
 
-                            if station_ok:
-                                IDs.append(code)
-                                lons.append(lon_station)
-                                lats.append(lat_station)
-                                lista_A_stations.append(code)
+    lista_A_stations = list(dict.fromkeys(lista_A_stations))
+    print(lista_A_stations)
 
-            lista_A_stations = list(dict.fromkeys(lista_A_stations))
-            
-            if len(IDs) > 0:
-                for vm in velocity_models:
-                    for k in kappa:
-                        for rt in rise_time:
-                            for rp in rad_pattern:
-                                for qs in qs_mode:
-                                    modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}_qs_{qs}"
-                                    rapids_ini = os.path.join(parent_folder_simulations, f'rapids_{row['event_id']}_{modello}.ini')
-                                    output_folder = os.path.join(parent_folder_simulations, row['event_id'], modello)
-                                    create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,path_recordings,IDs,lons,lats,qs)
-                                    lista_output_folders.append(output_folder)
-                                    lista_ini.append(rapids_ini)
-                                    num_jobs = num_jobs + 1
+    if len(IDs) > 0:
+        for vm in velocity_models:
+            for k in kappa:
+                for rt in rise_time:
+                    for rp in rad_pattern:
+                        for qs in qs_mode:
+                            modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}_qs_{qs}"
+                            rapids_ini = os.path.join(parent_folder_simulations, f'rapids_{row['event_id']}_{modello}.ini')
+                            output_folder = os.path.join(parent_folder_simulations, row['event_id'], modello)
+                            create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs,fmins,fmaxs,channels,path_rec_CRS,path_rec_RAN,path_inv_CRS,path_inv_RAN)
+                            lista_output_folders.append(output_folder)
+                            lista_ini.append(rapids_ini)
+                            num_jobs = num_jobs + 1
 
 script = os.path.join(parent_folder_simulations,"run_calibration.sh")
 with open(script, "w") as f:
