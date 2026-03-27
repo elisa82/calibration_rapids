@@ -1,0 +1,68 @@
+Station,Housing,Outcropping_Geology,Geomorphological_Scenario,Seismic_Response_Category
+ABSI,Vault,PP-Pg,H-ss,B-band_Low
+ACOM,Bunker,UP-Lb,H-cr,B-band_Low
+ADRI,Vault,Q-Ap,S-fp,B-band_High
+AFL,Vault,UT-Dp,H-cr,Deamplifying
+AGOR,Mine,UP-Lb,H-ss,Neutral
+APGO,Vault,Q-Am,S-sv,B-band_High
+BAD,Vault,JC-Lm,H-ss,Neutral
+BALD,Masonry hut,JC-Lm,H-cr,B-band_High
+BOO,Vault,Q-Am,S-ms,B-band_Low
+BOSI,Vault,Q-Am,S-dv,B-band_High
+BUA,Vault,PE-Fl,S-fh,B-band_Low
+CAE,Vault,JC-Lm,H-ss,Neutral
+CARE,Vault,PP-Ps,H-ms,Neutral
+CGRP,Bunker,JC-Lm,H-cr,B-band_Low
+CIMO,Bunker,UT-Dp,H-ss,Deamplifying
+CLUD,Mine,MT-Dl,H-es,Deamplifying
+COLI,Vault,PE-Fl,H-ms,B-band_High
+CSM,Vault,Q-Am,H-ss,Neutral
+CSO,Vault,Q-Am,S-ss,B-band_Low
+DOSS,Vault,JC-Lm,H-ms,B-band_High
+DRE,Vault,PE-Fl,H-cr,B-band_High
+ED01,Borehole (153m),Q-Ap,S-fp,B-band_Low
+ED02,Borehole (33m),PQ-Cm,S-ms,Deamplifying
+ED03,Borehole (32m),PQ-Cm,S-ms,B-band_Low
+ED04,Borehole (27m),PQ-Cm,S-fh,B-band_Low
+ED05,Borehole (10m),PQ-Cm,S-fh,B-band_Low
+ED06,Borehole (5m),PQ-Cm,S-fh,B-band_High
+ED07,Borehole (15m),PQ-Cm,S-fh,B-band_Low
+ED08,Borehole (15m),PQ-Cm,S-fh,B-band_High
+ED09,Borehole (15m),PQ-Cm,S-fh,B-band_Low
+ED10,Borehole (14m),PQ-Cm,S-fh,N-band
+FAU,Vault,PP-Ps,H-ss,Neutral
+FERB,Borehole (130m),Q-Ap,S-fp,Neutral
+FUSE,Vault,MT-Dl,H-es,Neutral
+GAGG,Vault,Q-Am,S-ss,B-band_Low
+GARG,Vault,JC-Lm,H-ss,Neutral
+GAVI,Vault,Q-Am,S-sv,B-band_High
+GAZZ,Vault,Q-Ap,S-fp,B-band_High
+GRDM,Vault,JC-Lm,H-cr,B-band_High
+IESO,Vault,Q-Ap,S-fp,B-band_High
+KOSI,Vault,O-Bi,H-ss,B-band_Low
+LSR,Vault,MT-Vo,H-cr,B-band_Low
+LUSI,Vault,JC-Lm,H-cr,B-band_High
+MARN,Vault,O-Bi,H-ss,B-band_High
+MLN,Vault,JC-Lm,H-ss,Neutral
+MOSI,Vault,PP-Ps,H-ss,B-band_Low
+MPRI,Vault,JC-Lm,H-fp,Neutral
+MTLO,Vault,PE-Fl,H-ms,N-band
+OZOL,Vault,UT-Dp,H-ss,B-band_High
+PANI,Bunker,PP-Ps,H-ms,B-band_Low
+PLRO,Vault,UC-La,H-ss,B-band_High
+PRED,Mine,UT-Dp,H-ss,Deamplifying
+QUIN,Vault,Q-Ap,S-fp,B-band_High
+RISI,Vault,PP-Ps,H-ms,B-band_High
+RONC,Vault,JC-Lm,H-ms,N-band
+ROSI,Vault,PP-Ps,H-ms,B-band_Low
+SABO,Bunker,JC-Lm,H-ss,B-band_High
+STIN (STI0),Vault,Q-Ap,S-fp,B-band_High
+STIN (STI1),Borehole (100m),Q-Ap,S-fp,B-band_Low
+TEOL,Masonry hut,PE-Fl,H-ms,N-band
+TRI,Cave,JC-Lm,H-fp,B-band_Low
+VARA,Vault,JC-Lm,H-ss,B-band_High
+VARN,Vault,JC-Lm,H-ms,B-band_High
+VINO,Cave,JC-Lm,H-ms,Neutral
+ZIAN,Vault,O-Bi,H-ms,B-band_Low
+ZOU,Vault,UC-La,H-cr,Deamplifying
+ZOU2,Borehole (10m),UC-La,H-cr,Deamplifying
