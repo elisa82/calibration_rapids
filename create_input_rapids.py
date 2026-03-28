@@ -58,7 +58,7 @@ def get_soil_class(net,sta,sensor):
     soil_class = None
 
     if net in ['OX', 'FV', 'NI']:
-        file_CRS = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/soil_class_Klin.csv'
+        file_CRS = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/soil_class_Klin.csv'
         df_crs = pd.read_csv(file_CRS)
         df_crs['Station'] = df_crs['Station'].astype(str).str.strip()
         df_crs['Geomorphological_Scenario'] = df_crs['Geomorphological_Scenario'].astype(str).str.strip()
@@ -69,7 +69,7 @@ def get_soil_class(net,sta,sensor):
             soil_class = selected_row['soil'].values[0]
 
     if soil_class is None and net == 'SL':
-        file_slovenia = '/Users/ezuccolo/Downloads/EC8_PGArecordingStations.xlsx'
+        file_slovenia = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/EC8_PGArecordingStations.xlsx'
         df_sl = pd.read_excel(file_slovenia)
         df_sl["station"] = df_sl["station"].astype(str).str.strip()
         df_sl["ground_type (EC8)"] = df_sl["ground_type (EC8)"].astype(str).str.strip()
@@ -80,7 +80,7 @@ def get_soil_class(net,sta,sensor):
             soil_class = selected_row['ground_type (EC8)'].values[0]
 
     if soil_class is None:
-        file_ESM = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Soil_classes/ESM_stations.xlsx'
+        file_ESM = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/ESM_stations.xlsx'
         df_esm = pd.read_excel(file_ESM)
         df_esm["Net_code"] = df_esm["Net_code"].astype(str).str.strip()
         df_esm["Sta_code"] = df_esm["Sta_code"].astype(str).str.strip()
@@ -227,7 +227,7 @@ path_inv_RAN = {inventory_folder_RAN}
 def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo):
     from datetime import datetime, timedelta
 
-    focal_mechanism_catalogue = r'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/Focalmechanisms/catalogue1928-2023_Suganal2024.csv'
+    focal_mechanism_catalogue = r'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/catalogue1928-2023_Suganal2024.csv'
     df_mt = pd.read_csv(
         focal_mechanism_catalogue,
         sep=";",
@@ -362,14 +362,8 @@ qs_mode = ['USGS','f1H','f5Hz','f10Hz']
 rise_time = ['Somerville1999','GusevChebrov2019']
 rad_pattern = ['fixed','randomized']
 
-file_terremoti = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/test_EQ/test_earthquakes_arso_2.txt'
 SETTINGS_FILE = f'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/UrgentShake/settings.ini'
 rows = []
-with open(file_terremoti, encoding="utf-8") as f:
-    for line in f:
-        parts = line.split()
-        if len(parts) >= 10 and parts[0].isdigit():
-            rows.append(parts[:10])
 
 path_lista_events = os.path.join('/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/catalogo_calibrazione_UCSB_Mw3NE.txt')
 df = pd.read_csv(
@@ -407,8 +401,8 @@ lista_ini = []
 lista_output_folders = []
 num_jobs = 0
 
-
 soil_cache = {}
+
 for i, row in df_events.iterrows():
     lat = df_events['lat'][i]
     lon = df_events['lon'][i]
@@ -420,7 +414,6 @@ for i, row in df_events.iterrows():
     dip = df_events['dip'][i]
     rak = df_events['rak'][i]
 
-    stations = []
     IDs = []
     lons = []
     lats = []
@@ -445,64 +438,83 @@ for i, row in df_events.iterrows():
             source_rec = source_rec_RAN
             
         if os.path.exists(path_recordings):
-
             if j == 0:
                 xml_files = glob.glob(os.path.join(path_metadata, "*.xml"))
             else:
                 recording_files = glob.glob(os.path.join(path_recordings, "*"))
-                stations = []
+                stations_RAN = []
                 for file in recording_files:
                     filename = os.path.basename(file)
                     parts = filename.split('.')
                     if len(parts) >= 3:
                         station_name = parts[2]
-                        stations.append(station_name)
-                stations = list(set(stations))
+                        stations_RAN.append(station_name)
+                stations_RAN = list(set(stations_RAN))
                 xml_files = []
-                for station in stations:
-                    path_xml = os.path.join(path_metadata, f"{station}.IT.xml")
+                for s in stations_RAN:
+                    path_xml = os.path.join(path_metadata, f"{s}.IT.xml")
                     if os.path.exists(path_xml):
                         xml_files.append(path_xml)
 
-            for file in xml_files:
-                inv = read_inventory(file)
-                for network in inv:
-                    for station in network:
-                        code = f"{network.code}.{station.code}"
-                        lat_station = station.latitude
-                        lon_station = station.longitude
+            inv_all = read_inventory(xml_files[0])
+            for file in xml_files[1:]:
+                inv_all += read_inventory(file)
 
-                        station_ok, valid_group, sensor_type = check_station_groups(code, path_recordings, source_rec)
+            stations_seen = set()
+            for network in inv_all:
+                for station in network:
+                    code = f"{network.code}.{station.code}"
 
-                        if sensor_type == "accelerometer":
-                            max_dist_km = 50
-                        else:
-                            max_dist_km = 100
+                    station_ok, valid_group, sensor_type = check_station_groups(code, path_recordings, source_rec)
 
-                        if station_ok:
-                            if lat_station >= 45.3 and lat_station < 47:
-                                if lon_station >= 12.5 and lon_station < 14.5:
+                    if not station_ok:
+                        continue
 
-                                    dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
-                                    dist_km = dist_m / 1000
+                    channel_type = valid_group[0][:2]
+                    unique_key = f"{code}.{channel_type}"
+                    if unique_key in stations_seen:
+                        continue
+                    stations_seen.add(unique_key)
 
-                                    if dist_km < max_dist_km:
-                                        
-                                        if code in soil_cache:
-                                            soil = soil_cache[code]
-                                        else:
-                                            soil = get_soil_class(network.code, station.code, sensor_type)
-                                            soil_cache[code] = soil
+                    channel_obj = None
+                    for ch in station:
+                        if ch.code.startswith(channel_type):
+                            channel_obj = ch
+                            break
+                    if channel_obj is None:
+                        continue  
 
-                                        if soil == 'A' or soil == 'H':
-                                            IDs.append(code)
-                                            lons.append(lon_station)
-                                            lats.append(lat_station)
-                                            channels.append(valid_group[0][:2])
-                                            fmin_rec, fmax_rec = define_filters(valid_group[0][:2])
-                                            fmins.append(fmin_rec)
-                                            fmaxs.append(fmax_rec)
-                                            lista_A_stations.append(code)
+                    lat_station = channel_obj.latitude
+                    lon_station = channel_obj.longitude
+                    if not (45.3 <= lat_station < 47 and 12.5 <= lon_station < 14.5):
+                        continue
+
+                    dist_m, az, baz = gps2dist_azimuth(lat, lon, lat_station, lon_station)
+                    dist_km = dist_m / 1000
+                    max_dist_km = 50 if sensor_type == "accelerometer" else 100
+
+                    if dist_km >= max_dist_km:
+                        continue
+
+                    if unique_key in soil_cache:
+                        soil = soil_cache[unique_key]
+                    else:
+                        soil = get_soil_class(network.code, station.code, sensor_type)
+                        soil_cache[unique_key] = soil
+                        
+                    if soil not in ['A','H']:
+                        continue
+
+                    IDs.append(code)
+                    lons.append(lon_station)
+                    lats.append(lat_station)
+                    channels.append(valid_group[0][:2])
+
+                    fmin_rec, fmax_rec = define_filters(channel_type)
+                    fmins.append(fmin_rec)
+                    fmaxs.append(fmax_rec)
+
+                    lista_A_stations.append(code)
 
     lista_A_stations = list(dict.fromkeys(lista_A_stations))
     print(lista_A_stations)
