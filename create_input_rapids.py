@@ -33,7 +33,8 @@ def check_station_groups(code, path_recordings,source_rec):
         all_exist = True
         for ch in group:
             if source_rec == "RAN":
-                pattern = os.path.join(path_recordings, f"*.{code}.{ch}")
+                station_part = code.split('.')[1]
+                pattern = os.path.join(path_recordings, f"*.{station_part}.{ch}")
                 matching_files = glob.glob(pattern)
                 if not matching_files:
                     all_exist = False
@@ -420,6 +421,7 @@ for i, row in df_events.iterrows():
     channels = []
     fmins = []
     fmaxs = []
+    stations_seen = set()
 
     path_rec_CRS = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'raw')
     path_inv_CRS = os.path.join(parent_recordings, 'event_based_dir', row['event_id'], 'response')
@@ -460,7 +462,6 @@ for i, row in df_events.iterrows():
             for file in xml_files[1:]:
                 inv_all += read_inventory(file)
 
-            stations_seen = set()
             for network in inv_all:
                 for station in network:
                     code = f"{network.code}.{station.code}"
