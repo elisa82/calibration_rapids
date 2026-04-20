@@ -6,6 +6,12 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="obspy.io.stationxml.core")
 
 def define_filters(ch):
+
+        <Sensor>
+          <Description>SARA SS45/SARA SL06 A 119 nV/count</Description>
+
+solo SARA
+
     if ch in ['HH', 'BH']:
         fmin = 0.1
     if ch in ['EH', 'SH', 'HN', 'HG']:
@@ -14,6 +20,8 @@ def define_filters(ch):
         fmax = 5
     else:
         fmax = 19.9
+
+        se SARA fmax deve essere 8 fino al 7/02/2024 escluso
     return fmin, fmax
 
 
@@ -200,7 +208,8 @@ freq_band_gf = LF
 kappa = {k}
 fmin_ucsb = 0.
 Tp_Tr = 0.2
-duration_ucsb = 60
+dt_ucsb = 0.009765625
+npts_ucsb = 8192 
 #tenere fisso fmax a questo valore per evitare problemi con dt
 fmax_ucsb = 20
 STF = Archuleta
@@ -348,6 +357,8 @@ import glob
 parent_folder = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration'
 parent_recordings = '/Volumes/xHD/work/Users/ezuccolo/Git/Concordia/Waveforms'
 parent_recordings_RAN = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/RAN_recordings'
+
+
 parent_folder_simulations = os.path.join(parent_folder, 'Simulations')
 os.makedirs(parent_folder_simulations, exist_ok=True)
 velocity_models = ['FRIUL7W','NAC_1D','NWSLOVENIA']
