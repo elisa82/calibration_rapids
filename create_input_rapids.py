@@ -453,6 +453,7 @@ for i, row in df_events.iterrows():
         if os.path.exists(path_recordings):
             if j == 0:
                 xml_files = glob.glob(os.path.join(path_metadata, "*.xml"))
+                xml_files = [f for f in xml_files if not os.path.basename(f).startswith("IT.")]
             else:
                 recording_files = glob.glob(os.path.join(path_recordings, "*"))
                 stations_RAN = []
