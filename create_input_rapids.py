@@ -5,23 +5,23 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="obspy.io.stationxml.core")
 
-def define_filters(ch):
-
-        <Sensor>
-          <Description>SARA SS45/SARA SL06 A 119 nV/count</Description>
-
-solo SARA
+def define_filters(ch, is_sara, current_date):
+    from datetime import date
+    import pandas as pd
 
     if ch in ['HH', 'BH']:
         fmin = 0.1
-    if ch in ['EH', 'SH', 'HN', 'HG']:
+    elif ch in ['EH', 'SH', 'HN', 'HG']:
         fmin = 0.2
+
     if ch in ['BH']:
         fmax = 5
     else:
         fmax = 19.9
 
-        se SARA fmax deve essere 8 fino al 7/02/2024 escluso
+    if is_sara and current_date < pd.Timestamp(2024, 2, 7): # se SARA fmax deve essere 8 fino al 7/02/2024 escluso
+        fmax = 8
+
     return fmin, fmax
 
 
@@ -61,13 +61,14 @@ def check_station_groups(code, path_recordings,source_rec):
     return False, None, None
 
 
-def get_soil_class(net,sta,sensor):
+def get_soil_class(net,sta,sensor,parent_folder):
     import pandas as pd
+    import os
 
     soil_class = None
 
     if net in ['OX', 'FV', 'NI']:
-        file_CRS = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/soil_class_Klin.csv'
+        file_CRS = os.path.join(parent_folder,'calibration_rapids/soil_class_Klin.csv')
         df_crs = pd.read_csv(file_CRS)
         df_crs['Station'] = df_crs['Station'].astype(str).str.strip()
         df_crs['Geomorphological_Scenario'] = df_crs['Geomorphological_Scenario'].astype(str).str.strip()
@@ -78,7 +79,7 @@ def get_soil_class(net,sta,sensor):
             soil_class = selected_row['soil'].values[0]
 
     if soil_class is None and net == 'SL':
-        file_slovenia = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/EC8_PGArecordingStations.xlsx'
+        file_slovenia = os.path.join(parent_folder,'calibration_rapids/EC8_PGArecordingStations.xlsx')
         df_sl = pd.read_excel(file_slovenia)
         df_sl["station"] = df_sl["station"].astype(str).str.strip()
         df_sl["ground_type (EC8)"] = df_sl["ground_type (EC8)"].astype(str).str.strip()
@@ -89,7 +90,7 @@ def get_soil_class(net,sta,sensor):
             soil_class = selected_row['ground_type (EC8)'].values[0]
 
     if soil_class is None:
-        file_ESM = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/ESM_stations.xlsx'
+        file_ESM = os.path.join(parent_folder,'calibration_rapids/ESM_stations.xlsx')
         df_esm = pd.read_excel(file_ESM)
         df_esm["Net_code"] = df_esm["Net_code"].astype(str).str.strip()
         df_esm["Sta_code"] = df_esm["Sta_code"].astype(str).str.strip()
@@ -138,7 +139,7 @@ def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
         f.write('echo "Job $SLURM_ARRAY_TASK_ID uses $SLURM_CPUS_PER_TASK cores"\n')
 
         f.write("\n")
-        f.write("source /leonardo/home/userexternal/ezuccolo/urgent_shake_venv/bin/activate\n")
+        f.write("source /leonardo/home/userexternal/ezuccolo/rapids_venv/bin/activate\n")
         f.write("source /leonardo/home/userexternal/ezuccolo/UrgentShake/profile.inc\n")
 
         f.write("\n")
@@ -146,8 +147,10 @@ def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
         f.write("export I_MPI_JOB_RESPECT_PROCESS_PLACEMENT=0\n\n")
 
         f.write("\n")
-        f.write(f"out_folder_list=({' '.join(f'\"{x}\"' for x in out_folders)})\n")
-        f.write(f"ini_file_list=({' '.join(f'\"{x}\"' for x in ini_files)})\n")
+        folders_str = " ".join(f'"{x}"' for x in out_folders)
+        f.write(f"out_folder_list=({folders_str})\n")
+        ini_str = " ".join(f'"{x}"' for x in ini_files)
+        f.write(f"ini_file_list=({ini_str})\n")
 
         f.write("\n")
         f.write("idx=$((SLURM_ARRAY_TASK_ID-1))\n")
@@ -234,10 +237,11 @@ path_inv_RAN = {inventory_folder_RAN}
 """)
 
 
-def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo):
+def retrieve_focal_mechanisms_Mw(datetime_slo,lat_slo,lon_slo,depth_slo,ml_slo,parent_folder):
     from datetime import datetime, timedelta
+    import os
 
-    focal_mechanism_catalogue = r'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/catalogue1928-2023_Suganal2024.csv'
+    focal_mechanism_catalogue = os.path.join(parent_folder,'calibration_rapids/catalogue1928-2023_Suganal2024.csv')
     df_mt = pd.read_csv(
         focal_mechanism_catalogue,
         sep=";",
@@ -354,11 +358,15 @@ from datetime import datetime, timedelta
 import glob
 
 
-parent_folder = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration'
-parent_recordings = '/Volumes/xHD/work/Users/ezuccolo/Git/Concordia/Waveforms'
-parent_recordings_RAN = '/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/RAN_recordings'
+working_path = '/leonardo_scratch/large/userexternal/ezuccolo'
+SETTINGS_FILE = f'/leonardo/home/userexternal/ezuccolo'
+#SETTINGS_FILE = f'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/UrgentShake/settings.ini'
+#parent_recordings = '/Volumes/xHD/work/Users/ezuccolo/Git/Concordia/Waveforms'
+parent_recordings = os.path.join(working_path, 'Waveforms')
 
 
+parent_recordings_RAN = os.path.join(working_path, 'Calibration', 'RAN_recordings')
+parent_folder = os.path.join(working_path, 'Calibration')
 parent_folder_simulations = os.path.join(parent_folder, 'Simulations')
 os.makedirs(parent_folder_simulations, exist_ok=True)
 velocity_models = ['FRIUL7W','NAC_1D','NWSLOVENIA']
@@ -374,10 +382,9 @@ qs_mode = ['USGS','f1H','f5Hz','f10Hz']
 rise_time = ['Somerville1999','GusevChebrov2019']
 rad_pattern = ['fixed','randomized']
 
-SETTINGS_FILE = f'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/UrgentShake/settings.ini'
 rows = []
 
-path_lista_events = os.path.join('/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/CONCORDIA/Calibration/calibration_rapids/catalogo_calibrazione_UCSB_Mw3NE.txt')
+path_lista_events = os.path.join(parent_folder,'calibration_rapids/catalogo_calibrazione_UCSB_Mw3NE.txt')
 df = pd.read_csv(
     path_lista_events,
     parse_dates=["datetime"],
@@ -497,6 +504,12 @@ for i, row in df_events.iterrows():
                     if channel_obj is None:
                         continue  
 
+                    is_sara = False
+                    sensor_description = ""
+                    if network.code != "IT" and channel_obj.sensor is not None:
+                        sensor_description = channel_obj.sensor.description or ""
+                        is_sara = "SARA" in sensor_description.upper()
+
                     lat_station = channel_obj.latitude
                     lon_station = channel_obj.longitude
                     if not (45.3 <= lat_station < 47 and 12.5 <= lon_station < 14.5):
@@ -512,7 +525,7 @@ for i, row in df_events.iterrows():
                     if unique_key in soil_cache:
                         soil = soil_cache[unique_key]
                     else:
-                        soil = get_soil_class(network.code, station.code, sensor_type)
+                        soil = get_soil_class(network.code, station.code, sensor_type, parent_folder)
                         soil_cache[unique_key] = soil
                         
                     if soil not in ['A','H']:
@@ -522,8 +535,9 @@ for i, row in df_events.iterrows():
                     lons.append(lon_station)
                     lats.append(lat_station)
                     channels.append(valid_group[0][:2])
-
-                    fmin_rec, fmax_rec = define_filters(channel_type)
+    
+                    event_date = pd.to_datetime(date)
+                    fmin_rec, fmax_rec = define_filters(channel_type, is_sara, event_date)
                     fmins.append(fmin_rec)
                     fmaxs.append(fmax_rec)
 
@@ -539,7 +553,10 @@ for i, row in df_events.iterrows():
                     for rp in rad_pattern:
                         for qs in qs_mode:
                             modello = f"{vm}_k0_{k}_Tr_{rt}_rp_{rp}_qs_{qs}"
-                            rapids_ini = os.path.join(parent_folder_simulations, f'rapids_{row['event_id']}_{modello}.ini')
+                            rapids_ini = os.path.join(
+                                parent_folder_simulations,
+                                f"rapids_{row['event_id']}_{modello}.ini"
+                            )
                             output_folder = os.path.join(parent_folder_simulations, row['event_id'], modello)
                             create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs,fmins,fmaxs,channels,path_rec_CRS,path_rec_RAN,path_inv_CRS,path_inv_RAN)
                             lista_output_folders.append(output_folder)
