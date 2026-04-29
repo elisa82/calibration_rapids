@@ -1,3 +1,32 @@
+def create_submit_sequential(scripts):
+    """
+    Crea uno script bash che sottomette job Slurm in sequenza con dependency.
+    """
+
+    output_file="submit_all.sh"
+    dependency_type="afterok"
+    with open(output_file, "w") as f:
+        f.write("#!/bin/bash\n\n")
+        f.write("prev_job_id=\"\"\n\n")
+
+        for script in scripts:
+
+            f.write(f"echo \"Submitting {script}\"\n")
+
+            f.write("if [ -z \"$prev_job_id\" ]; then\n")
+            f.write(f"    job_id=$(sbatch {script} | awk '{{print $4}}')\n")
+            f.write("else\n")
+            f.write(f"    job_id=$(sbatch --dependency={dependency_type}:$prev_job_id {script} | awk '{{print $4}}')\n")
+            f.write("fi\n")
+
+            f.write("echo \" -> Job ID: $job_id\"\n")
+            f.write("prev_job_id=$job_id\n\n")
+
+    print(f"Submit script creato: {output_file}")
+
+    return 
+
+
 from collections.abc import Iterable
 from pathlib import Path
 import pandas as pd
@@ -104,77 +133,99 @@ def get_soil_class(net,sta,sensor,parent_folder):
     return soil_class
 
 
-def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files):
+def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files, parent_folder):
+    import os
+    import math
+
+    out_folders_file = os.path.join(parent_folder,'calibration_rapids','out_folders.txt')
+    ini_files_file = os.path.join(parent_folder,'calibration_rapids','ini_files.txt')
+
+    with open(out_folders_file, "w") as f:
+        f.write("\n".join(out_folders))
+
+    with open(ini_files_file, "w") as f:
+        f.write("\n".join(ini_files))
+
     cores_per_job = 20
     memory_per_job = 50  # GB
-    total_cores_available = 1000
-    time_limit = "1:00:00"  # hh:mm:ss
+    total_cores_available = 2000
+    time_limit = "24:00:00"  # hh:mm:ss
 
-    max_concurrent_jobs = total_cores_available // cores_per_job
     max_concurrent_jobs = 100
-    if max_concurrent_jobs == 0:
-        max_concurrent_jobs = 1 
+    MAX_ARRAY = 1000
 
-    with open(script_filename, "w") as f:
-        f.write("#!/bin/bash\n")
-        f.write("#SBATCH --job-name=calibration\n")
-        f.write(f"#SBATCH --array=1-{NUM_JOBS}%{max_concurrent_jobs}\n")
-        f.write(f"#SBATCH --time={time_limit}\n")
-        f.write("#SBATCH --ntasks=1\n")
-        f.write(f"#SBATCH --cpus-per-task={cores_per_job}\n")
-        f.write(f"#SBATCH --mem={memory_per_job}G\n")
-        f.write("#SBATCH --output=out_%A_%a.out\n")
-        f.write("#SBATCH --account=OGS23_PRACE_IT_1\n")
-        f.write("#SBATCH --partition=dcgp_usr_prod\n")
-        f.write("#SBATCH --qos=normal\n")
+    num_scripts = math.ceil(NUM_JOBS / MAX_ARRAY)
+    script_filenames_chunks = []
 
-        f.write("\n")
-        f.write("module purge\n")
-        f.write("module load openmpi/4.1.6--gcc--12.2.0\n")
-        f.write("module load gmt/6.4.0--gcc--12.2.0\n")
-        f.write("module load python/3.11.6--gcc--12.2.0-nlkgjki\n")
+    for s in range(num_scripts):
 
-        f.write("\n")
-        f.write("export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n")
-        f.write('echo "Job $SLURM_ARRAY_TASK_ID uses $SLURM_CPUS_PER_TASK cores"\n')
+        start_job = s * MAX_ARRAY + 1
+        end_job = min((s + 1) * MAX_ARRAY, NUM_JOBS)
 
-        f.write("\n")
-        f.write("source /leonardo/home/userexternal/ezuccolo/rapids_venv/bin/activate\n")
-        f.write("source /leonardo/home/userexternal/ezuccolo/UrgentShake/profile.inc\n")
+        script_filename_chunk = f"{script_filename}_part{s+1}.sh"
+        script_filenames_chunks.append(script_filename_chunk)
 
-        f.write("\n")
-        f.write("unset I_MPI_PMI_LIBRARY\n")
-        f.write("export I_MPI_JOB_RESPECT_PROCESS_PLACEMENT=0\n\n")
+        with open(script_filename_chunk, "w") as f:
+            f.write("#!/bin/bash\n")
+            f.write("#SBATCH --job-name=calibration\n")
 
-        f.write("\n")
-        folders_str = " ".join(f'"{x}"' for x in out_folders)
-        f.write(f"out_folder_list=({folders_str})\n")
-        ini_str = " ".join(f'"{x}"' for x in ini_files)
-        f.write(f"ini_file_list=({ini_str})\n")
+            # array chunck
+            f.write(f"#SBATCH --array={start_job}-{end_job}%{max_concurrent_jobs}\n")
 
-        f.write("\n")
-        f.write("idx=$((SLURM_ARRAY_TASK_ID-1))\n")
-        f.write("out_folder=${out_folder_list[$idx]}\n")
-        f.write("ini_file=${ini_file_list[$idx]}\n\n")
+            f.write(f"#SBATCH --time={time_limit}\n")
+            f.write(f"#SBATCH --nodes=1\n")
+            f.write(f"#SBATCH --cpus-per-task={cores_per_job}\n")
+            f.write(f"#SBATCH --mem={memory_per_job}G\n")
+            f.write("#SBATCH --output=out_%A_%a.out\n")
+            f.write("#SBATCH --account=OGS23_PRACE_IT_1\n")
+            f.write("#SBATCH --partition=dcgp_usr_prod\n")
+            f.write("#SBATCH --qos=normal\n\n")
 
-        f.write("\n")
-        f.write("cd $HOME\n")
-        f.write('rm -rf "$out_folder"\n')
-        f.write('mkdir -p "$out_folder"\n')
+            f.write("module purge\n")
+            f.write("module load openmpi/4.1.6--gcc--12.2.0\n")
+            f.write("module load gmt/6.4.0--gcc--12.2.0\n")
+            f.write("module load python/3.11.6--gcc--12.2.0-nlkgjki\n\n")
 
-        f.write('my_prex_or_die "python -m rapids $ini_file ucsb --run"\n')
+            f.write("export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n")
+            f.write('echo "Job $SLURM_ARRAY_TASK_ID uses $SLURM_CPUS_PER_TASK cores"\n\n')
 
-        f.write('cd "$out_folder/UCSB" || exit 1\n')
-        f.write('my_prex_or_die "bash do_all.sh"\n')
+            f.write("source /leonardo/home/userexternal/ezuccolo/rapids_venv/bin/activate\n")
+            f.write("source /leonardo/home/userexternal/ezuccolo/UrgentShake/profile.inc\n\n")
 
-        f.write("cd $HOME\n")
-        f.write('my_prex_or_die "python -m rapids $ini_file ucsbrec --post"\n')
+            f.write("unset I_MPI_PMI_LIBRARY\n")
+            f.write("export I_MPI_JOB_RESPECT_PROCESS_PLACEMENT=0\n\n")
 
-        f.write("\n")
-    return
+            f.write("cd $HOME\n\n")
 
-def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs_mode,fmins,fmaxs,channels,recordings_folder_CRS,recordings_folder_RAN,inventory_folder_CRS,inventory_folder_RAN):
-    gf = f"{vm}_{qs_mode}"
+            f.write("idx=$SLURM_ARRAY_TASK_ID\n\n")
+
+            f.write(f"out_folder=$(sed -n \"${{idx}}p\" {out_folders_file})\n")
+            f.write(f"ini_file=$(sed -n \"${{idx}}p\" {ini_files_file})\n\n")
+
+            f.write("if [ -z \"$out_folder\" ]; then\n")
+            f.write("    exit 0\n")
+            f.write("fi\n\n")
+
+            f.write("done_flag=\"$out_folder/.DONE\"\n")
+            f.write("if [ -f \"$done_flag\" ]; then\n")
+            f.write("    echo \"Task $idx already completed, skipping\"\n")
+            f.write("    exit 0\n")
+            f.write("fi\n\n")
+
+            f.write("mkdir -p \"$out_folder\"\n\n")
+            f.write("my_prex_or_die \"python -m rapids $ini_file ucsb --run\"\n")
+            f.write("cd \"$out_folder/UCSB\" || exit 1\n")
+            f.write("my_prex_or_die \"bash do_all.sh\"\n")
+            f.write("cd $HOME\n")
+            f.write("my_prex_or_die \"python -m rapids $ini_file ucsbrec --post\"\n\n")
+
+            f.write("done\n")
+    return script_filenames_chunks
+
+def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs_mode,fmins,fmaxs,channels,recordings_folder_CRS,recordings_folder_RAN,inventory_folder_CRS,inventory_folder_RAN,gf_folder_root):
+    import os
+    gf_name = f"{vm}_{qs_mode}"
+    gf = os.path.join(gf_folder_root,gf_name)
     IDs_text = ', '.join(IDs)
     lats_text = ', '.join(str(lat) for lat in lats)
     lons_text = ', '.join(str(lon) for lon in lons)
@@ -359,11 +410,11 @@ import glob
 
 
 working_path = '/leonardo_scratch/large/userexternal/ezuccolo'
-SETTINGS_FILE = f'/leonardo/home/userexternal/ezuccolo'
+SETTINGS_FILE = f'/leonardo/home/userexternal/ezuccolo/settings.ini'
 #SETTINGS_FILE = f'/Users/ezuccolo/Library/CloudStorage/Dropbox/Lavoro/Progetti/UrgentShake/settings.ini'
 #parent_recordings = '/Volumes/xHD/work/Users/ezuccolo/Git/Concordia/Waveforms'
 parent_recordings = os.path.join(working_path, 'Waveforms')
-
+gf_folder_root = os.path.join(working_path, 'GF')
 
 parent_recordings_RAN = os.path.join(working_path, 'Calibration', 'RAN_recordings')
 parent_folder = os.path.join(working_path, 'Calibration')
@@ -378,7 +429,7 @@ kappa = [0,0.025,0.037,0.045]
 #Gentili S., Franceschina G., 2011. High frequency attenuation of shear waves in the southeastern Alps and northern Dinarides, Geophys. J. Int., 185(3), 1393–1416..10.1111/j.1365-246X.2011.05016.x
 #3) Malagnini et al., 2002
 #Malagnini L., Akinci A., Herrmann R., Pino N., Scognamiglio L., 2002. Characteristics of the ground motion in northeastern Italy, Bull. seism. Soc. Am., 92, 2186–2204..10.1785/0120010219
-qs_mode = ['USGS','f1H','f5Hz','f10Hz']
+qs_mode = ['USGS','f1Hz','f5Hz','f10Hz']
 rise_time = ['Somerville1999','GusevChebrov2019']
 rad_pattern = ['fixed','randomized']
 
@@ -544,7 +595,6 @@ for i, row in df_events.iterrows():
                     lista_A_stations.append(code)
 
     lista_A_stations = list(dict.fromkeys(lista_A_stations))
-    print(lista_A_stations)
 
     if len(IDs) > 0:
         for vm in velocity_models:
@@ -558,7 +608,7 @@ for i, row in df_events.iterrows():
                                 f"rapids_{row['event_id']}_{modello}.ini"
                             )
                             output_folder = os.path.join(parent_folder_simulations, row['event_id'], modello)
-                            create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs,fmins,fmaxs,channels,path_rec_CRS,path_rec_RAN,path_inv_CRS,path_inv_RAN)
+                            create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs,fmins,fmaxs,channels,path_rec_CRS,path_rec_RAN,path_inv_CRS,path_inv_RAN,gf_folder_root)
                             lista_output_folders.append(output_folder)
                             lista_ini.append(rapids_ini)
                             num_jobs = num_jobs + 1
@@ -578,4 +628,5 @@ with open(script, "w") as f:
 
 
 script_filename= "run_array.sh"
-create_script_slurm(num_jobs,script_filename,lista_output_folders,lista_ini)
+script_filenames_chunks = create_script_slurm(num_jobs,script_filename,lista_output_folders,lista_ini,parent_folder)
+create_submit_sequential(script_filenames_chunks)
