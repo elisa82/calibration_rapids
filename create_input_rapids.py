@@ -146,7 +146,7 @@ def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files, parent
     with open(ini_files_file, "w") as f:
         f.write("\n".join(ini_files))
 
-    cores_per_job = 20
+    cores_per_job = 50
     memory_per_job = 50  # GB
     total_cores_available = 2000
     time_limit = "24:00:00"  # hh:mm:ss
@@ -216,10 +216,11 @@ def create_script_slurm(NUM_JOBS,script_filename, out_folders, ini_files, parent
             f.write("my_prex_or_die \"python -m rapids $ini_file ucsb --run\"\n")
             f.write("cd \"$out_folder/UCSB\" || exit 1\n")
             f.write("my_prex_or_die \"bash do_all.sh\"\n")
+            f.write("rm -f HF/model.green_LF\n")
+            f.write("rm -f HF/Green_Bank.inf\n")
             f.write("cd $HOME\n")
             f.write("my_prex_or_die \"python -m rapids $ini_file ucsbrec --post\"\n\n")
 
-            f.write("done\n")
     return script_filenames_chunks
 
 def create_ini(lat,lon,depth,date,time,mw,stk,dip,rak,output_folder,SETTINGS_FILE,rapids_ini,vm,k,rt,rp,IDs,lons,lats,qs_mode,fmins,fmaxs,channels,recordings_folder_CRS,recordings_folder_RAN,inventory_folder_CRS,inventory_folder_RAN,gf_folder_root):
@@ -612,6 +613,7 @@ for i, row in df_events.iterrows():
                             lista_output_folders.append(output_folder)
                             lista_ini.append(rapids_ini)
                             num_jobs = num_jobs + 1
+                            print(num_jobs)
 
 script = os.path.join(parent_folder_simulations,"run_calibration.sh")
 with open(script, "w") as f:
